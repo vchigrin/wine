@@ -56,7 +56,52 @@ struct wgl_context
 {
     OSMesaContext context;
     UINT          format;
+    int width;
+    int height;
+    int stride;
+    void* bits;
+
+    void (*postprocess_data_from_mesa)(struct wgl_context*);
+    void (*preprocess_data_to_mesa)(struct wgl_context*);
 };
+
+static __thread struct wgl_context* current_context;
+
+void convert_565_to_555(struct wgl_context* context)
+{
+    u_int8_t* cur_line = (u_int8_t*)context->bits;
+    for (int y = 0; y < context->height; ++y) {
+        for (int x = 0; x < context->width; ++x) {
+            u_int16_t src_px = ((u_int16_t*)cur_line)[x];
+            u_int16_t r = src_px & 0x1F;
+            u_int16_t g = (src_px >> 5) & 0x3F;
+            u_int16_t b = (src_px >> 11) & 0x1F;
+            g = (g >> 1);
+            u_int16_t dst_px = r | (g << 5) | (b << 10);
+            ((u_int16_t*)cur_line)[x] = dst_px;
+        }
+        cur_line += context->stride;
+    }
+}
+
+void convert_555_to_565(struct wgl_context* context)
+{
+    u_int8_t* cur_line = (u_int8_t*)context->bits;
+    for (int y = 0; y < context->height; ++y) {
+        for (int x = 0; x < context->width; ++x) {
+            u_int16_t src_px = ((u_int16_t*)cur_line)[x];
+            u_int16_t r = src_px & 0x1F;
+            u_int16_t g = (src_px >> 5) & 0x1F;
+            u_int16_t b = (src_px >> 10) & 0x1F;
+            g = (g << 1);
+            u_int16_t dst_px = r | (g << 5) | (b << 11);
+            ((u_int16_t*)cur_line)[x] = dst_px;
+        }
+        cur_line += context->stride;
+    }
+}
+
+
 
 static struct opengl_funcs opengl_funcs;
 
@@ -71,6 +116,23 @@ static void * (*pOSMesaGetProcAddress)( const char *funcName );
 static GLboolean (*pOSMesaMakeCurrent)( OSMesaContext ctx, void *buffer, GLenum type,
                                         GLsizei width, GLsizei height );
 static void (*pOSMesaPixelStore)( GLint pname, GLint value );
+
+void WINE_GLAPI (*pOriginalGLFlush)(void);
+void WINE_GLAPI hooked_glFlush(void) {
+    pOriginalGLFlush();
+    if (current_context && current_context->postprocess_data_from_mesa) {
+        current_context->postprocess_data_from_mesa(current_context);
+    }
+}
+
+void WINE_GLAPI (*pOriginalGLFinish)(void);
+void WINE_GLAPI hooked_glFinish(void) {
+    pOriginalGLFinish();
+    if (current_context && current_context->postprocess_data_from_mesa) {
+        current_context->postprocess_data_from_mesa(current_context);
+    }
+}
+
 
 static BOOL init_opengl(void)
 {
@@ -109,6 +171,16 @@ static BOOL init_opengl(void)
             goto failed;
         }
     }
+    for (i = 0; i < ARRAY_SIZE( opengl_func_names ); i++) {
+        if (strcmp(opengl_func_names[i], "glFlush") == 0) {
+            pOriginalGLFlush = (((void **)&opengl_funcs.gl))[i];
+            (((void **)&opengl_funcs.gl))[i] = &hooked_glFlush;
+        }
+        else if (strcmp(opengl_func_names[i], "glFinish") == 0) {
+            pOriginalGLFinish = (((void **)&opengl_funcs.gl))[i];
+            (((void **)&opengl_funcs.gl))[i] = &hooked_glFinish;
+        }
+    }
 
     return TRUE;
 
@@ -133,6 +205,7 @@ static struct wgl_context * osmesa_create_context( HDC hdc, const PIXELFORMATDES
 {
     struct wgl_context *context;
     UINT gl_format;
+    int is_source_555 = 0;
 
     switch (descr->cColorBits)
     {
@@ -146,12 +219,22 @@ static struct wgl_context * osmesa_create_context( HDC hdc, const PIXELFORMATDES
         break;
     case 16:
         gl_format = OSMESA_RGB_565;
+        if (descr->cGreenBits == 5) {
+            is_source_555 = 1;
+        }
         break;
     default:
         return NULL;
     }
     if (!(context = malloc( sizeof( *context )))) return NULL;
     context->format = gl_format;
+    if (is_source_555) {
+        context->postprocess_data_from_mesa = &convert_565_to_555;
+        context->preprocess_data_to_mesa = &convert_555_to_565;
+    } else {
+        context->postprocess_data_from_mesa = NULL;
+        context->preprocess_data_to_mesa = NULL;
+    }
     if (!(context->context = pOSMesaCreateContextExt( gl_format, descr->cDepthBits, descr->cStencilBits,
                                                       descr->cAccumBits, 0 )))
     {
@@ -166,6 +249,9 @@ static struct wgl_context * osmesa_create_context( HDC hdc, const PIXELFORMATDES
  */
 static BOOL osmesa_delete_context( struct wgl_context *context )
 {
+    if (context == current_context) {
+        current_context = NULL;
+    }
     pOSMesaDestroyContext( context->context );
     free( context );
     return TRUE;
@@ -191,10 +277,19 @@ static BOOL osmesa_make_current( struct wgl_context *context, void *bits,
     if (!context)
     {
         pOSMesaMakeCurrent( NULL, NULL, GL_UNSIGNED_BYTE, 0, 0 );
+        current_context = NULL;
         return TRUE;
     }
 
     type = context->format == OSMESA_RGB_565 ? GL_UNSIGNED_SHORT_5_6_5 : GL_UNSIGNED_BYTE;
+    current_context = context;
+    current_context->width = width;
+    current_context->height = height;
+    current_context->stride = stride;
+    current_context->bits = bits;
+    if (current_context->preprocess_data_to_mesa) {
+        current_context->preprocess_data_to_mesa(current_context);
+    }
     ret = pOSMesaMakeCurrent( context->context, bits, type, width, height );
     if (ret)
     {
