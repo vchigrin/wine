@@ -34,7 +34,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dib);
 
-static const struct osmesa_funcs *osmesa_funcs;
+const struct osmesa_funcs *osmesa_funcs;
 
 static const DWORD bit_fields_888[3] = {0xff0000, 0x00ff00, 0x0000ff};
 static const DWORD bit_fields_555[3] = {0x7c00, 0x03e0, 0x001f};
@@ -422,8 +422,8 @@ static const struct
     { 24,  8, 0,  8, 8,  8, 16, 0, 0,   16, 16, 8 },
     { 24,  8, 16, 8, 8,  8, 0,  0, 0,   16, 32, 8 },
     { 24,  8, 16, 8, 8,  8, 0,  0, 0,   16, 16, 8 },
-    { 16,  5, 0,  6, 5,  5, 11, 0, 0,   16, 32, 8 },
-    { 16,  5, 0,  6, 5,  5, 11, 0, 0,   16, 16, 8 },
+    { 16,  5, 0,  5, 5,  5, 10, 0, 0,   16, 32, 8 },
+    { 16,  5, 0,  5, 5,  5, 10, 0, 0,   16, 16, 8 },
 };
 
 /**********************************************************************

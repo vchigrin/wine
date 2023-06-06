@@ -30,6 +30,7 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dib);
+extern const struct osmesa_funcs *osmesa_funcs;
 
 struct cached_glyph
 {
@@ -935,6 +936,9 @@ BOOL dibdrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
                    &clipped_rects, &bounds );
 
 done:
+    if (osmesa_funcs) {
+        osmesa_funcs->renew_current_context_from_user_dib();
+    }
     add_clipped_bounds( pdev, &bounds, pdev->clip );
     free_clipped_rects( &clipped_rects );
     return TRUE;
@@ -1205,6 +1209,9 @@ BOOL dibdrv_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
         ret = brush->rects( pdev, brush, &pdev->dib, clipped_rects.count, clipped_rects.rects,
                             &dc->attr->brush_org, rop2 );
         break;
+    }
+    if (osmesa_funcs) {
+        osmesa_funcs->renew_current_context_from_user_dib();
     }
     free_clipped_rects( &clipped_rects );
     return ret;

@@ -30,6 +30,7 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dib);
+extern const struct osmesa_funcs *osmesa_funcs;
 
 #define DST 0   /* Destination dib */
 #define SRC 1   /* Source dib */
@@ -1039,6 +1040,9 @@ DWORD dibdrv_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
     }
     free_dib_info( &src_dib );
     if (tmp_rgn) NtGdiDeleteObjectApp( tmp_rgn );
+    if (osmesa_funcs) {
+        osmesa_funcs->renew_current_context_from_user_dib();
+    }
     return ret;
 
 update_format:
@@ -1075,7 +1079,11 @@ DWORD dibdrv_BlendImage( PHYSDEV dev, BITMAPINFO *info, const struct gdi_image_b
     init_dib_info_from_bitmapinfo( &src_dib, info, bits->ptr );
     src_dib.bits.is_copy = bits->is_copy;
     add_clipped_bounds( pdev, &dst->visrect, pdev->clip );
-    return blend_rect( &pdev->dib, &dst->visrect, &src_dib, &src->visrect, pdev->clip, blend );
+    BOOL result = blend_rect( &pdev->dib, &dst->visrect, &src_dib, &src->visrect, pdev->clip, blend );
+    if (osmesa_funcs) {
+        osmesa_funcs->renew_current_context_from_user_dib();
+    }
+    return result;
 
 update_format:
     if (blend.AlphaFormat & AC_SRC_ALPHA)  /* source alpha requires A8R8G8B8 format */
@@ -1412,7 +1420,11 @@ BOOL dibdrv_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
     if (dst->width == 1 && src->width > 1) src->width--;
     if (dst->height == 1 && src->height > 1) src->height--;
 
-    return dc_dst->nulldrv.funcs->pStretchBlt( &dc_dst->nulldrv, dst, src_dev, src, rop );
+    BOOL result = dc_dst->nulldrv.funcs->pStretchBlt( &dc_dst->nulldrv, dst, src_dev, src, rop );
+    if (osmesa_funcs) {
+        osmesa_funcs->renew_current_context_from_user_dib();
+    }
+    return result;
 }
 
 /***********************************************************************
@@ -1423,7 +1435,11 @@ BOOL dibdrv_AlphaBlend( PHYSDEV dst_dev, struct bitblt_coords *dst,
 {
     DC *dc_dst = get_physdev_dc( dst_dev );
 
-    return dc_dst->nulldrv.funcs->pAlphaBlend( &dc_dst->nulldrv, dst, src_dev, src, blend );
+    BOOL result = dc_dst->nulldrv.funcs->pAlphaBlend( &dc_dst->nulldrv, dst, src_dev, src, blend );
+    if (osmesa_funcs) {
+        osmesa_funcs->renew_current_context_from_user_dib();
+    }
+    return result;
 }
 
 /***********************************************************************
