@@ -298,6 +298,7 @@ struct osmesa_funcs
     PROC (*get_proc_address)( const char *proc );
     BOOL (*make_current)( struct wgl_context *context, void *bits,
                           int width, int height, int bpp, int stride );
+    void (*renew_current_context_from_user_dib)();
 };
 
 extern const struct osmesa_funcs *init_opengl_lib(void) DECLSPEC_HIDDEN;
